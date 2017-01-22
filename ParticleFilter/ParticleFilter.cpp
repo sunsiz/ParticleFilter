@@ -10,50 +10,50 @@ using namespace cv;
 #define G(image,x,y) ((uchar*)(image->imageData + image->widthStep*(y)))[(x)*3+1]	//G
 #define R(image,x,y) ((uchar*)(image->imageData + image->widthStep*(y)))[(x)*3+2]	//R
 
-# define R_BIN      8  /* 红色分量的直方图条数 */
-# define G_BIN      8  /* 绿色分量的直方图条数 */
-# define B_BIN      8  /* 兰色分量的直方图条数 */
+# define R_BIN      8  /* The weight of red in histogram	红色分量的直方图条数 */
+# define G_BIN      8  /* The weight of green in histogram	绿色分量的直方图条数 */
+# define B_BIN      8  /* The weight of blue in histogram	兰色分量的直方图条数 */
 
-# define R_SHIFT    5  /* 与上述直方图条数对应 */
-# define G_SHIFT    5  /* 的R、G、B分量左移位数 */
-# define B_SHIFT    5  /* log2( 256/8 )为移动位数 */
+# define R_SHIFT    5  /* The left shift of R,G,B weights	与上述直方图条数对应 */
+# define G_SHIFT    5  /* mentioned in above histogram		的R、G、B分量左移位数 */
+# define B_SHIFT    5  /* based on shift of log2( 256/8 )	log2( 256/8 )为移动位数 */
 
-typedef struct __SpaceState {  /* 状态空间变量 */
-	int xt;               /* x坐标位置 */
-	int yt;               /* y坐标位置 */
-	float v_xt;           /* x方向运动速度 */
-	float v_yt;           /* y方向运动速度 */
-	int Hxt;              /* x方向半窗宽 */
-	int Hyt;              /* y方向半窗宽 */
-	float at_dot;         /* 尺度变换速度，粒子所代表的那一片区域的尺度变化速度 */
+typedef struct __SpaceState {		/* 状态空间变量 */
+	int xt;							/* x坐标位置 */
+	int yt;							/* y坐标位置 */
+	float v_xt;						/* x方向运动速度 */
+	float v_yt;						/* y方向运动速度 */
+	int Hxt;						/* x方向半窗宽 */
+	int Hyt;						/* y方向半窗宽 */
+	float at_dot;					/* 尺度变换速度，粒子所代表的那一片区域的尺度变化速度 */
 } SPACESTATE;
 
-bool pause=false;//是否暂停
-bool track = false;//是否跟踪
+bool pause=false;					//是否暂停
+bool track = false;					//是否跟踪
 IplImage *curframe=NULL;
 IplImage *pTrackImg =NULL;
-unsigned char * img;//把iplimg改到char*  便于计算
-int xin,yin;//跟踪时输入的中心点
-int xout,yout;//跟踪时得到的输出中心点
-int Wid,Hei;//图像的大小
-int WidIn,HeiIn;//输入的半宽与半高
-int WidOut,HeiOut;//输出的半宽与半高
+unsigned char * img;				//把iplimg改到char*  便于计算
+int xin,yin;						//跟踪时输入的中心点
+int xout,yout;						//跟踪时得到的输出中心点
+int Wid,Hei;						//图像的大小
+int WidIn,HeiIn;					//输入的半宽与半高
+int WidOut,HeiOut;					//输出的半宽与半高
 
-float DELTA_T = (float)0.05;    /* 帧频，可以为30，25，15，10等 */
-float VELOCITY_DISTURB = 40.0;  /* 速度扰动幅值   */
-float SCALE_DISTURB = 0.0;      /* 窗宽高扰动幅度 */
+float DELTA_T = (float)0.05;		/* 帧频，可以为30，25，15，10等 */
+float VELOCITY_DISTURB = 40.0;		/* 速度扰动幅值   */
+float SCALE_DISTURB = 0.0;			/* 窗宽高扰动幅度 */
 float SCALE_CHANGE_D = (float)0.001;   /* 尺度变换速度扰动幅度 */
 
-int NParticle = 100;       /* 粒子个数   */
-float * ModelHist = NULL; /* 模型直方图 */
-SPACESTATE * states = NULL;  /* 状态数组 */
-float * weights = NULL;   /* 每个粒子的权重 */
-int nbin;                 /* 直方图条数 */
-float Pi_Thres = (float)0.90; /* 权重阈值   */
+int NParticle = 100;				/* 粒子个数   */
+float * ModelHist = NULL;			/* 模型直方图 */
+SPACESTATE * states = NULL;			/* 状态数组 */
+float * weights = NULL;				/* 每个粒子的权重 */
+int nbin;							/* 直方图条数 */
+float Pi_Thres = (float)0.90;		/* 权重阈值   */
 
 int bSelectObject = 0;
 Point origin;
-Rect selection;//一个矩形对象
+Rect selection;						//一个矩形对象
 
 /*
 计算一幅图像中某个区域的彩色直方图分布
@@ -69,12 +69,13 @@ float * ColorHist：    彩色直方图，颜色索引按：
 i = r * G_BIN * B_BIN + g * B_BIN + b排列
 int bins：             彩色直方图的条数R_BIN*G_BIN*B_BIN（这里取8x8x8=512）
 */
+
 void CalcuColorHistogram( int x0, int y0, int Wx, int Hy,
 						 unsigned char * image, int W, int H,
 						 float * ColorHist, int bins )
 {
-	int x_begin, y_begin;  /* 指定图像区域的左上角坐标 */
-	int y_end, x_end;
+	int x_begin, y_begin;			/* 指定图像区域的左上角坐标 */
+	int y_end, x_end;				/* 指定图像区域的右下角坐标 */
 	int x, y, i, index;
 	int r, g, b;
 	float k, r2, f;
@@ -93,23 +94,23 @@ void CalcuColorHistogram( int x0, int y0, int Wx, int Hy,
 	if ( y_begin < 0 ) y_begin = 0;
 	x_end = x0 + Wx;
 	y_end = y0 + Hy;
-	if ( x_end >= W ) x_end = W-1;//超出范围的话就用画的框的边界来赋值粒子的区域
+	if ( x_end >= W ) x_end = W-1;	//超出范围的话就用画的框的边界来赋值粒子的区域
 	if ( y_end >= H ) y_end = H-1;
-	a2 = Wx*Wx+Hy*Hy;                /* 计算半径平方a^2 */
-	f = 0.0;                         /* 归一化系数 */
+	a2 = Wx*Wx+Hy*Hy;               /* 计算半径平方a^2 */
+	f = 0.0;                        /* 归一化系数 */
 	for ( y = y_begin; y <= y_end; y++ )
 		for ( x = x_begin; x <= x_end; x++ )
 		{
-			r = image[(y*W+x)*3] >> R_SHIFT;   /* 计算直方图 */
-			g = image[(y*W+x)*3+1] >> G_SHIFT; /*移位位数根据R、G、B条数 */
+			r = image[(y*W+x)*3] >> R_SHIFT;					/* 计算直方图 */
+			g = image[(y*W+x)*3+1] >> G_SHIFT;					/*移位位数根据R、G、B条数 */
 			b = image[(y*W+x)*3+2] >> B_SHIFT;
-			index = r * G_BIN * B_BIN + g * B_BIN + b;//把当前rgb换成一个索引
+			index = r * G_BIN * B_BIN + g * B_BIN + b;			//把当前rgb换成一个索引
 			r2 = (float)(((y-y0)*(y-y0)+(x-x0)*(x-x0))*1.0/a2); /* 计算半径平方r^2 */
-			k = 1 - r2;   /* k(r) = 1-r^2, |r| < 1; 其他值 k(r) = 0 ，影响力*/
+			k = 1 - r2;											/* k(r) = 1-r^2, |r| < 1; 其他值 k(r) = 0 ，影响力*/
 			f = f + k;
-			ColorHist[index] = ColorHist[index] + k;  /* 计算核密度加权彩色直方图 */
+			ColorHist[index] = ColorHist[index] + k;			/* 计算核密度加权彩色直方图 */
 		}
-		for ( i = 0; i < bins; i++ )     /* 归一化直方图 */
+		for ( i = 0; i < bins; i++ )							/* 归一化直方图 */
 			ColorHist[i] = ColorHist[i]/f;
 
 		return;
@@ -123,6 +124,7 @@ int bins：            直方图条数
 返回值：
 Bhattacharyya系数
 */
+
 float CalcuBhattacharyya( float * p, float * q, int bins )
 {
 	int i;
@@ -198,11 +200,11 @@ int Initialize( int x0, int y0, int Wx, int Hy,
 			   unsigned char * img, int W, int H )
 {
 	int i, j;
-	srand((unsigned int)(time(NULL)));
-	states = new SPACESTATE [NParticle]; /* 申请状态数组的空间 */
-	weights = new float [NParticle];     /* 申请粒子权重数组的空间 */
-	nbin = R_BIN * G_BIN * B_BIN; /* 确定直方图条数 */
-	ModelHist = new float [nbin]; /* 申请直方图内存 */
+	srand(static_cast<unsigned int>(time(NULL)));
+	states = new SPACESTATE [NParticle];				/* 申请状态数组的空间 */
+	weights = new float [NParticle];					/* 申请粒子权重数组的空间 */
+	nbin = R_BIN * G_BIN * B_BIN;						/* 确定直方图条数 */
+	ModelHist = new float [nbin];						/* 申请直方图内存 */
 	if ( ModelHist == NULL ) return( -1 );
 
 	/* 计算目标模板直方图 */
@@ -230,7 +232,7 @@ int Initialize( int x0, int y0, int Wx, int Hy,
 		/* 权重统一为1/N，让每个粒子有相等的机会 */
 		weights[i] = (float)(1.0/NParticle);
 	}
-	return( 1 );
+	return 1;
 }
 
 
@@ -295,14 +297,14 @@ void ImportanceSampling( float * c, int * ResampleIndex, int N )
 	float rnum, * cumulateWeight;
 	int i, j;
 
-	cumulateWeight = new float [N+1]; /* 申请累计权重数组内存，大小为N+1 */
+	cumulateWeight = new float [N+1];			/* 申请累计权重数组内存，大小为N+1 */
 	NormalizeCumulatedWeight( c, cumulateWeight, N ); /* 计算累计权重 */
 	for ( i = 0; i < N; i++ )
 	{
-		rnum = rand0_1();       /* 随机产生一个[0,1]间均匀分布的数 */
+		rnum = rand0_1();						/* 随机产生一个[0,1]间均匀分布的数 */
 		j = BinearySearch( rnum, cumulateWeight, N+1 ); /* 搜索<=rnum的最小索引j */
 		if ( j == N ) j--;
-		ResampleIndex[i] = j;	/* 放入重采样索引数组 */
+		ResampleIndex[i] = j;					/* 放入重采样索引数组 */
 	}
 
 	delete[] cumulateWeight;
@@ -321,15 +323,15 @@ SPACESTATE * state：     更新过的样本集
 */
 void ReSelect( SPACESTATE * state, float * weight, int N )
 {
-	SPACESTATE * tmpState;//新的放狗的地方
-	int i, * rsIdx;//统计的随机数所掉区间的索引
+	SPACESTATE * tmpState;						//新的放狗的地方
+	int i, * rsIdx;								//统计的随机数所掉区间的索引
 
 	tmpState = new SPACESTATE[N];
 	rsIdx = new int[N];
 
-	ImportanceSampling( weight, rsIdx, N ); /* 根据权重重新采样 */
+	ImportanceSampling( weight, rsIdx, N );		/* 根据权重重新采样 */
 	for ( i = 0; i < N; i++ )
-		tmpState[i] = state[rsIdx[i]];//temState为临时变量,其中state[i]用state[rsIdx[i]]来代替
+		tmpState[i] = state[rsIdx[i]];			//temState为临时变量,其中state[i]用state[rsIdx[i]]来代替
 	for ( i = 0; i < N; i++ )
 		state[i] = tmpState[i];
 
@@ -600,7 +602,7 @@ void main(int argc, char *argv[])//参数的个数  参数
 	/*if( argc == 1 || (argc == 2 && strlen(argv[1]) == 1 && isdigit(argv[1][0])))
 	capture = cvCaptureFromCAM( argc == 2 ? argv[1][0] - '0' : 0 );//从摄像头读取视频
 	else if( argc == 2 )*/
-	capture = cvCaptureFromAVI( /*argv[1]*/"E://111.wmv");//直接读取
+	capture = cvCaptureFromAVI( /*argv[1]*"E://111.wmv"*/"C:\\Users\\zapas\\Source\\Repos\\ParticleFilter2\\ParticleFilter\\Resource\\12.avi");//直接读取
 	int rho_v;//表示合法性
 	float max_weight;
 	cvNamedWindow("video",1);
@@ -656,4 +658,5 @@ void main(int argc, char *argv[])//参数的个数  参数
 	//释放图像
 	cvDestroyAllWindows();
 	ClearAll();
+	cin.get();
 }
